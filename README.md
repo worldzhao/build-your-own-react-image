@@ -73,11 +73,9 @@ function useImage({
 
 我们已经完成了最基础的实现，现在来慢慢优化。
 
-#### 缓存已加载过的图片
+#### 性能优化
 
-![使用缓存前](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqgcg3t73g31qw0puqn2.gif)
-
-由于使用`new Image()`的形式加载图片，对于同一张图片来讲，在组件 A 加载过的图片，组件 B 不用再走一遍`new Image()`的流程（在 `Chrome` 上表现为重复请求了图片，同时浏览器一般会缓存图片），直接返回上一次结果即可。
+对于同一张图片来讲，在组件 A 加载过的图片，组件 B 不用再走一遍`new Image()`的流程，直接返回上一次结果即可。
 
 ```diff
 + const cache: {
@@ -114,9 +112,7 @@ function useImage({
 }
 ```
 
-对比一下效果：
-
-![使用缓存后](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqgak4enug31qw0puam3.gif)
+优化了一丢丢性能。
 
 #### 支持 srcList
 
@@ -124,4 +120,122 @@ function useImage({
 
 展示`error`占位符我们可以通过`error`状态去控制，但是加载备选图片的功能还没有完成。
 
-主要思路如下：从第一张开始加载，如果加载失败就加在第二张，直到加载成功某一张或全部加载失败，流程结束。类似于 [tapable](https://github.com/webpack/tapable) 的`AsyncSeriesBailHook`。
+主要思路如下：
+
+1. 将入参`src`改为`srcList`，值为图片`url`或图片（含备选图片）的`url`数组；
+2. 从第一张开始加载，若加载失败则加载第二张，直到加载成功某一张或全部加载失败，流程结束。类似于 [tapable](https://github.com/webpack/tapable) 的`AsyncSeriesBailHook`。
+
+对入参进行处理：
+
+```ts
+const removeBlankArrayElements = (a: string[]) => a.filter(x => x);
+
+const stringToArray = (x: string | string[]) => (Array.isArray(x) ? x : [x]);
+
+function useImage({
+  srcList,
+}: {
+  srcList: string | string[];
+}): { src: string | undefined; loading: boolean; error: any } {
+  // 获取url数组
+  const sourceList = removeBlankArrayElements(stringToArray(srcList));
+  // 获取用于缓存的键名
+  const sourceKey = sourceList.join('');
+}
+```
+
+接下来就是重要的加载流程啦，定义`promiseFind`方法，用于完成以上加载图片的逻辑。
+
+```ts
+/**
+ * 注意 此处将imgPromise作为参数传入，而没有直接使用imgPromise
+ * 主要是为了扩展性
+ * 后面会将imgPromise方法作为一个参数由使用者传入，使得使用者加载图片的操作空间更大
+ * 当然若使用者不传该参数，就是用默认的imgPromise方法
+ */
+function promiseFind(
+  sourceList: string[],
+  imgPromise: (src: string) => Promise<void>
+): Promise<string> {
+  let done = false;
+  // 重新使用Promise包一层
+  return new Promise((resolve, reject) => {
+    const queueNext = (src: string) => {
+      return imgPromise(src).then(() => {
+        done = true;
+        // 加载成功 resolve
+        resolve(src);
+      });
+    };
+
+    const firstPromise = queueNext(sourceList.shift() || '');
+
+    // 生成一条promise链[队列]，每一个promise都跟着catch方法处理当前promise的失败
+    // 从而继续下一个promise的处理
+    sourceList
+      .reduce((p, src) => {
+        // 如果加载失败 继续加载
+        return p.catch(() => {
+          if (!done) return queueNext(src);
+          return;
+        });
+      }, firstPromise)
+      // 全都挂了 reject
+      .catch(reject);
+  });
+}
+```
+
+再来改动`useImage`。
+
+```diff
+const cache: {
+-  [key: string]: Promise<void>;
++  [key: string]: Promise<string>;
+} = {};
+
+function useImage({
+-  src,
++  srcList,
+}: {
+- src: string;
++ srcList: string | string[];
+}): { src: string | undefined; loading: boolean; error: any } {
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [value, setValue] = React.useState<string | undefined>(undefined);
+
+// 图片链接数组
++ const sourceList = removeBlankArrayElements(stringToArray(srcList));
+// cache唯一键名
++ const sourceKey = sourceList.join('');
+
+  React.useEffect(() => {
+-   if (!cache[src]) {
+-     cache[src] = imgPromise(src);
+-   }
+
++   if (!cache[sourceKey]) {
++     cache[sourceKey] = promiseFind(sourceList, imgPromise);
++   }
+
+-    cache[src]
+-    .then(() => {
++    cache[sourceKey]
++     .then((src) => {
+        setLoading(false);
+        setValue(src);
+      })
+      .catch(error => {
+        setLoading(false);
+        setError(error);
+      });
+  }, [src]);
+
+  return { isLoading: loading, src: value, error: error };
+}
+```
+
+需要注意的一点：现在传入的图片链接可能不是单个`src`，最终设置的`value`为`promiseFind`找到的`src`，所以 `cache` 类型定义也有变化。
+
+![useImage-srcList](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqjodm1evj31em0u0dk7.jpg)

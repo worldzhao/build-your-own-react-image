@@ -1,37 +1,27 @@
 import 'react-app-polyfill/ie11';
 import * as React from 'react';
 import * as ReactDOM from 'react-dom';
-import { useImage } from '../.';
+import { Collapse } from 'react-collapse';
+import CacheDemo from './useImage.cache';
+import SrcListDemo from './useImage.srcList';
+
+type DemoType = 'srcListDemo' | 'cacheDemo' | '';
 
 const App = () => {
-  const [visible, setVisible] = React.useState(false);
-  const { src, loading, error } = useImage({
-    src: 'https://dummyimage.com/3000x3000/000/fff',
-  });
-
+  const [demoType, showDemo] = React.useState<DemoType>('');
   return (
     <div>
-      <h2>main</h2>
-      <p>loading:{JSON.stringify(loading)}</p>
-      <p>error:{JSON.stringify(error)}</p>
-      <p>src:{src}</p>
-      <button onClick={() => setVisible(!visible)}>toggle</button>
-      {visible && <Another></Another>}
-    </div>
-  );
-};
-
-const Another = () => {
-  const { src, loading, error } = useImage({
-    src: 'https://dummyimage.com/3000x3000/000/fff',
-  });
-
-  return (
-    <div>
-      <h2>another</h2>
-      <p>loading:{JSON.stringify(loading)}</p>
-      <p>error:{JSON.stringify(error)}</p>
-      <p>src:{src}</p>
+      <h2>cache demo </h2>
+      <button onClick={() => showDemo('cacheDemo')}>show cache demo</button>
+      <Collapse isOpened={demoType === 'cacheDemo'}>
+        <CacheDemo></CacheDemo>
+      </Collapse>
+      <br />
+      <h2>srcList demo </h2>
+      <button onClick={() => showDemo('srcListDemo')}>show srcList demo</button>
+      <Collapse isOpened={demoType === 'srcListDemo'}>
+        <SrcListDemo></SrcListDemo>
+      </Collapse>
     </div>
   );
 };

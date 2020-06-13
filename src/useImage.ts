@@ -9,26 +9,60 @@ function imgPromise(src: string): Promise<void> {
   });
 }
 
+function promiseFind(
+  sourceList: string[],
+  imgPromise: (src: string) => Promise<void>
+): Promise<string> {
+  let done = false;
+  return new Promise((resolve, reject) => {
+    const queueNext = (src: string) => {
+      return imgPromise(src).then(() => {
+        done = true;
+        resolve(src);
+      });
+    };
+
+    const firstPromise = queueNext(sourceList.shift() || '');
+
+    sourceList
+      .reduce((p, src) => {
+        // ensure we aren't done before enquing the next source
+        return p.catch(() => {
+          if (!done) return queueNext(src);
+          return;
+        });
+      }, firstPromise)
+      .catch(reject);
+  });
+}
+
+const removeBlankArrayElements = (a: string[]) => a.filter(x => x);
+
+const stringToArray = (x: string | string[]) => (Array.isArray(x) ? x : [x]);
+
 const cache: {
-  [key: string]: Promise<void>;
+  [key: string]: Promise<string>;
 } = {};
 
 function useImage({
-  src,
+  srcList,
 }: {
-  src: string;
+  srcList: string | string[];
 }): { src: string | undefined; loading: boolean; error: any } {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [value, setValue] = React.useState<string | undefined>(undefined);
 
+  const sourceList = removeBlankArrayElements(stringToArray(srcList));
+  const sourceKey = sourceList.join('');
+
   React.useEffect(() => {
-    if (!cache[src]) {
-      cache[src] = imgPromise(src);
+    if (!cache[sourceKey]) {
+      cache[sourceKey] = promiseFind(sourceList, imgPromise);
     }
 
-    cache[src]
-      .then(() => {
+    cache[sourceKey]
+      .then(src => {
         setLoading(false);
         setValue(src);
       })
@@ -36,7 +70,7 @@ function useImage({
         setLoading(false);
         setError(error);
       });
-  }, [src]);
+  }, [sourceKey]);
 
   return { loading: loading, src: value, error: error };
 }
