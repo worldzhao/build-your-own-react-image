@@ -26,7 +26,6 @@ function promiseFind(
 
     sourceList
       .reduce((p, src) => {
-        // ensure we aren't done before enquing the next source
         return p.catch(() => {
           if (!done) return queueNext(src);
           return;
@@ -44,11 +43,15 @@ const cache: {
   [key: string]: Promise<string>;
 } = {};
 
-function useImage({
-  srcList,
-}: {
+export interface useImageParams {
+  loadImg?: (src: string) => Promise<void>;
   srcList: string | string[];
-}): { src: string | undefined; loading: boolean; error: any } {
+}
+
+function useImage({
+  loadImg = imgPromise,
+  srcList,
+}: useImageParams): { src: string | undefined; loading: boolean; error: any } {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState(null);
   const [value, setValue] = React.useState<string | undefined>(undefined);
@@ -58,7 +61,7 @@ function useImage({
 
   React.useEffect(() => {
     if (!cache[sourceKey]) {
-      cache[sourceKey] = promiseFind(sourceList, imgPromise);
+      cache[sourceKey] = promiseFind(sourceList, loadImg);
     }
 
     cache[sourceKey]
@@ -74,5 +77,4 @@ function useImage({
 
   return { loading: loading, src: value, error: error };
 }
-
 export default useImage;

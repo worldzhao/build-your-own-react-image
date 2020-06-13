@@ -14,7 +14,6 @@ const SrcListDemo = () => {
   return (
     <div>
       <div>
-        <br />
         <strong> 传入srcList的值为：</strong>
         <ol style={{ border: '1px solid #000', color: 'rgb(64, 59, 133)' }}>
           <li>error-path</li>

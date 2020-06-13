@@ -1,15 +1,11 @@
-## 循序渐进，写一个好用的 react-image 组件
+## 前言
 
-### 前言
+> 本文为笔者阅读 [react-image](https://github.com/mbrevda/react-image) 源码过程中的总结，若有所错漏烦请指出。
 
-本文为笔者阅读 [react-image](https://github.com/mbrevda/react-image) 仓库源码过程中的总结，若有所错漏烦请指出。
-
-`<img />`可以说是开发过程中极其常用的标签了。但是很多同学都是`<img src="xxx.png" />`一把梭，直到 UI 小姐姐来找你谈谈人生理想：
+`<img />`可以说是开发过程中极其常用的标签了。然而很多同学都是`<img src="xxx.png" />`一把梭，直到 UI 小姐姐来找你谈谈人生理想：
 
 1. 图片加载太慢，需要展示`loading`占位符；
 2. 图片加载失败，加载备选图片或展示`error`占位符。
-
-可能有些公司要求严格一些，错误的图片需要进行上报。
 
 作为开发者的我们，可能会经历以下几个阶段：
 
@@ -19,9 +15,10 @@
 
 现在让我们直接从第三阶段开始，看看如何使用少量代码打造一个易用性、封装性以及扩展性俱佳的`image`组件。
 
-Talk is cheap, show me your code.
+![Img.gif](https://fdfs.xmcdn.com/group82/M00/83/FC/wKg5Il7m3UHzLZnvABnCpmJg7MQ747.gif)
+[本文仓库](https://github.com/worldzhao/build-your-own-react-image)
 
-### useImage
+## useImage
 
 首先分析可复用的逻辑，可以发现使用者需要关注三个状态：`loading`、`error`以及`src`，毕竟加载图片也是异步请求嘛。
 
@@ -29,7 +26,7 @@ Talk is cheap, show me your code.
 
 自定义一个 hooks，接收图片链接作为参数，返回调用方需要的三个状态。
 
-#### 基础实现
+### 基础实现
 
 ```ts
 import * as React from 'react';
@@ -60,7 +57,7 @@ function useImage({
         setLoading(false);
         setValue(src);
       })
-      .catch(error => {
+      .catch((error) => {
         // 加载失败
         setLoading(false);
         setError(error);
@@ -71,9 +68,9 @@ function useImage({
 }
 ```
 
-我们已经完成了最基础的实现，现在来慢慢优化。
+我们已经完成了最基础的实现，接下来慢慢优化。
 
-#### 性能优化
+### 性能优化
 
 对于同一张图片来讲，在组件 A 加载过的图片，组件 B 不用再走一遍`new Image()`的流程，直接返回上一次结果即可。
 
@@ -114,21 +111,21 @@ function useImage({
 
 优化了一丢丢性能。
 
-#### 支持 srcList
+### 支持 srcList
 
 上文提到过一点：图片加载失败，加载备选图片或展示`error`占位符。
 
-展示`error`占位符我们可以通过`error`状态去控制，但是加载备选图片的功能还没有完成。
+展示`error`占位符可以通过`error`状态去控制，但加载备选图片的功能还未完成。
 
 主要思路如下：
 
 1. 将入参`src`改为`srcList`，值为图片`url`或图片（含备选图片）的`url`数组；
-2. 从第一张开始加载，若加载失败则加载第二张，直到加载成功某一张或全部加载失败，流程结束。类似于 [tapable](https://github.com/webpack/tapable) 的`AsyncSeriesBailHook`。
+2. 从第一张开始加载，若失败则加载第二张，直到某一张成功或全部失败，流程结束。
 
 对入参进行处理：
 
 ```ts
-const removeBlankArrayElements = (a: string[]) => a.filter(x => x);
+const removeBlankArrayElements = (a: string[]) => a.filter((x) => x);
 
 const stringToArray = (x: string | string[]) => (Array.isArray(x) ? x : [x]);
 
@@ -238,4 +235,119 @@ function useImage({
 
 需要注意的一点：现在传入的图片链接可能不是单个`src`，最终设置的`value`为`promiseFind`找到的`src`，所以 `cache` 类型定义也有变化。
 
-![useImage-srcList](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqjodm1evj31em0u0dk7.jpg)
+![useImage-srcList](https://fdfs.xmcdn.com/group87/M02/83/6E/wKg5IV7m3XuiK523AAET-9d0vGk051.png)
+
+### 自定义 imgPromise
+
+前面提到过，加载图片过程中，使用方可能会插入自己的逻辑，所以将 `imgPromise` 方法作为可选参数`loadImg`传入，若使用者想自定义加载方法，可传入该参数。
+
+```diff
+function useImage({
++ loadImg = imgPromise,
+  srcList,
+}: {
++ loadImg?: (src: string) => Promise<void>;
+  srcList: string | string[];
+}): { src: string | undefined; loading: boolean; error: any } {
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [value, setValue] = React.useState<string | undefined>(undefined);
+
+  const sourceList = removeBlankArrayElements(stringToArray(srcList));
+  const sourceKey = sourceList.join('');
+
+  React.useEffect(() => {
+    if (!cache[sourceKey]) {
+-     cache[sourceKey] = promiseFind(sourceList, imgPromise);
++     cache[sourceKey] = promiseFind(sourceList, loadImg);
+    }
+
+    cache[sourceKey]
+      .then(src => {
+        setLoading(false);
+        setValue(src);
+      })
+      .catch(error => {
+        setLoading(false);
+        setError(error);
+      });
+  }, [sourceKey]);
+
+  return { loading: loading, src: value, error: error };
+}
+```
+
+## 实现 Img 组件
+
+完成`useImage`后，我们就可以基于其实现 `Img` 组件了。
+
+预先定义好相关 API：
+
+| 属性     | 说明                                 | 类型                        | 默认值     |
+| -------- | ------------------------------------ | --------------------------- | ---------- |
+| src      | 图片链接                             | string / string[]           | -          |
+| loader   | 可选，加载过程占位元素               | ReactNode                   | null       |
+| unloader | 可选，加载失败占位元素               | ReactNode                   | null       |
+| loadImg  | 可选，图片加载方法，返回一个 Promise | (src:string)=>Promise<void> | imgPromise |
+
+当然，除了以上 API，还有`<img />`标签原生属性。编写类型声明文件如下：
+
+```ts
+export type ImgProps = Omit<
+  React.DetailedHTMLProps<
+    React.ImgHTMLAttributes<HTMLImageElement>,
+    HTMLImageElement
+  >,
+  'src'
+> &
+  Omit<useImageParams, 'srcList'> & {
+    src: useImageParams['srcList'];
+    loader?: JSX.Element | null;
+    unloader?: JSX.Element | null;
+  };
+```
+
+实现如下：
+
+```tsx
+export default ({
+  src: srcList,
+  loadImg,
+  loader = null,
+  unloader = null,
+  ...imgProps
+}: ImgProps) => {
+  const { src, loading, error } = useImage({
+    srcList,
+    loadImg,
+  });
+
+  if (src) return <img src={src} {...imgProps} />;
+  if (loading) return loader;
+  if (error) return unloader;
+
+  return null;
+};
+```
+
+测试效果如下：
+
+![Img.gif](https://fdfs.xmcdn.com/group82/M00/83/FC/wKg5Il7m3UHzLZnvABnCpmJg7MQ747.gif)
+比较简单，就不多说啦。
+
+[本文仓库](https://github.com/worldzhao/build-your-own-react-image)，欢迎 star😝。
+
+## 结语
+
+值得注意的是，本文遵循 `react-image` 大体思路，但部分内容暂未实现（所以代码可读性要好一点）。其它特性，如：
+
+1. 支持 Suspense 形式调用；
+2. 默认在渲染图片前会进行 decode，避免页面卡顿或者闪烁。
+
+有兴趣的同学可以看看下面这些文章：
+
+- [用于数据获取的 Suspense（试验阶段）](https://zh-hans.reactjs.org/docs/concurrent-mode-suspense.html)
+- [错误边界（Error Boundaries）](https://zh-hans.reactjs.org/docs/error-boundaries.html#introducing-error-boundaries)
+- [React：Suspense 的实现与探讨](https://zhuanlan.zhihu.com/p/34210780)
+- [HTMLImageElement.decode()](https://developer.mozilla.org/zh-CN/docs/Web/API/HTMLImageElement/decode)
+- [Chrome 图片解码与 Image.decode API](https://zhuanlan.zhihu.com/p/43991630)
