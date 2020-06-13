@@ -1,167 +1,127 @@
-# TSDX React User Guide
+## 循序渐进，写一个好用的 react-image 组件
 
-Congrats! You just saved yourself hours of work by bootstrapping this project with TSDX. Let’s get you oriented with what’s here and how to use it.
+### 前言
 
-> This TSDX setup is meant for developing React components (not apps!) that can be published to NPM. If you’re looking to build an app, you should use `create-react-app`, `razzle`, `nextjs`, `gatsby`, or `react-static`.
+本文为笔者阅读 [react-image](https://github.com/mbrevda/react-image) 仓库源码过程中的总结，若有所错漏烦请指出。
 
-> If you’re new to TypeScript and React, checkout [this handy cheatsheet](https://github.com/sw-yx/react-typescript-cheatsheet/)
+`<img />`可以说是开发过程中极其常用的标签了。但是很多同学都是`<img src="xxx.png" />`一把梭，直到 UI 小姐姐来找你谈谈人生理想：
 
-## Commands
+1. 图片加载太慢，需要展示`loading`占位符；
+2. 图片加载失败，加载备选图片或展示`error`占位符。
 
-TSDX scaffolds your new library inside `/src`, and also sets up a [Parcel-based](https://parceljs.org) playground for it inside `/example`.
+可能有些公司要求严格一些，错误的图片需要进行上报。
 
-The recommended workflow is to run TSDX in one terminal:
+作为开发者的我们，可能会经历以下几个阶段：
 
-```bash
-npm start # or yarn start
-```
+- 第一阶段：`img`标签上使用`onLoad`以及`onError`进行处理；
+- 第二阶段：写一个较为通用的组件；
+- 第三阶段：抽离 `hooks`，使用方自定义视图组件（当然也要提供基本组件）；
 
-This builds to `/dist` and runs the project in watch mode so any edits you save inside `src` causes a rebuild to `/dist`.
+现在让我们直接从第三阶段开始，看看如何使用少量代码打造一个易用性、封装性以及扩展性俱佳的`image`组件。
 
-Then run the example inside another:
+Talk is cheap, show me your code.
 
-```bash
-cd example
-npm i # or yarn to install dependencies
-npm start # or yarn start
-```
+### useImage
 
-The default example imports and live reloads whatever is in `/dist`, so if you are seeing an out of date component, make sure TSDX is running in watch mode like we recommend above. **No symlinking required**, [we use Parcel's aliasing](https://github.com/palmerhq/tsdx/pull/88/files).
+首先分析可复用的逻辑，可以发现使用者需要关注三个状态：`loading`、`error`以及`src`，毕竟加载图片也是异步请求嘛。
 
-To do a one-off build, use `npm run build` or `yarn build`.
+> 对 [react-use](https://github.com/streamich/react-use) 熟悉的同学会很容易联想到`useAsync`。
 
-To run tests, use `npm test` or `yarn test`.
+自定义一个 hooks，接收图片链接作为参数，返回调用方需要的三个状态。
 
-## Configuration
+#### 基础实现
 
-Code quality is [set up for you](https://github.com/palmerhq/tsdx/pull/45/files) with `prettier`, `husky`, and `lint-staged`. Adjust the respective fields in `package.json` accordingly.
+```ts
+import * as React from 'react';
 
-### Jest
+// 将图片加载转为promise调用形式
+function imgPromise(src: string) {
+  return new Promise((resolve, reject) => {
+    const i = new Image();
+    i.onload = () => resolve();
+    i.onerror = reject;
+    i.src = src;
+  });
+}
 
-Jest tests are set up to run with `npm test` or `yarn test`. This runs the test watcher (Jest) in an interactive mode. By default, runs tests related to files changed since the last commit.
+function useImage({
+  src,
+}: {
+  src: string;
+}): { src: string | undefined; isLoading: boolean; error: any } {
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [value, setValue] = React.useState<string | undefined>(undefined);
 
-#### Setup Files
+  React.useEffect(() => {
+    imgPromise(src)
+      .then(() => {
+        // 加载成功
+        setLoading(false);
+        setValue(src);
+      })
+      .catch(error => {
+        // 加载失败
+        setLoading(false);
+        setError(error);
+      });
+  }, [src]);
 
-This is the folder structure we set up for you:
-
-```shell
-/example
-  index.html
-  index.tsx       # test your component here in a demo app
-  package.json
-  tsconfig.json
-/src
-  index.tsx       # EDIT THIS
-/test
-  blah.test.tsx   # EDIT THIS
-.gitignore
-package.json
-README.md         # EDIT THIS
-tsconfig.json
-```
-
-#### React Testing Library
-
-We do not set up `react-testing-library` for you yet, we welcome contributions and documentation on this.
-
-### Rollup
-
-TSDX uses [Rollup v1.x](https://rollupjs.org) as a bundler and generates multiple rollup configs for various module formats and build settings. See [Optimizations](#optimizations) for details.
-
-### TypeScript
-
-`tsconfig.json` is set up to interpret `dom` and `esnext` types, as well as `react` for `jsx`. Adjust according to your needs.
-
-## Continuous Integration
-
-### Travis
-
-_to be completed_
-
-### Circle
-
-_to be completed_
-
-## Optimizations
-
-Please see the main `tsdx` [optimizations docs](https://github.com/palmerhq/tsdx#optimizations). In particular, know that you can take advantage of development-only optimizations:
-
-```js
-// ./types/index.d.ts
-declare var __DEV__: boolean;
-
-// inside your code...
-if (__DEV__) {
-  console.log('foo');
+  return { isLoading: loading, src: value, error: error };
 }
 ```
 
-You can also choose to install and use [invariant](https://github.com/palmerhq/tsdx#invariant) and [warning](https://github.com/palmerhq/tsdx#warning) functions.
+我们已经完成了最基础的实现，现在来慢慢优化。
 
-## Module Formats
+#### 缓存已加载过的图片
 
-CJS, ESModules, and UMD module formats are supported.
+![使用缓存前](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqgcg3t73g31qw0puqn2.gif)
 
-The appropriate paths are configured in `package.json` and `dist/index.js` accordingly. Please report if any issues are found.
-
-## Using the Playground
-
-```bash
-cd example
-npm i # or yarn to install dependencies
-npm start # or yarn start
-```
-
-The default example imports and live reloads whatever is in `/dist`, so if you are seeing an out of date component, make sure TSDX is running in watch mode like we recommend above. **No symlinking required**!
-
-## Deploying the Playground
-
-The Playground is just a simple [Parcel](https://parceljs.org) app, you can deploy it anywhere you would normally deploy that. Here are some guidelines for **manually** deploying with the Netlify CLI (`npm i -g netlify-cli`):
-
-```bash
-cd example # if not already in the example folder
-npm run build # builds to dist
-netlify deploy # deploy the dist folder
-```
-
-Alternatively, if you already have a git repo connected, you can set up continuous deployment with Netlify:
-
-```bash
-netlify init
-# build command: yarn build && cd example && yarn && yarn build
-# directory to deploy: example/dist
-# pick yes for netlify.toml
-```
-
-## Named Exports
-
-Per Palmer Group guidelines, [always use named exports.](https://github.com/palmerhq/typescript#exports) Code split inside your React app instead of your React library.
-
-## Including Styles
-
-There are many ways to ship styles, including with CSS-in-JS. TSDX has no opinion on this, configure how you like.
-
-For vanilla CSS, you can include it at the root directory and add it to the `files` section in your `package.json`, so that it can be imported separately by your users and run through their bundler's loader.
-
-## Publishing to NPM
-
-We recommend using [np](https://github.com/sindresorhus/np).
-
-## Usage with Lerna
-
-When creating a new package with TSDX within a project set up with Lerna, you might encounter a `Cannot resolve dependency` error when trying to run the `example` project. To fix that you will need to make changes to the `package.json` file _inside the `example` directory_.
-
-The problem is that due to the nature of how dependencies are installed in Lerna projects, the aliases in the example project's `package.json` might not point to the right place, as those dependencies might have been installed in the root of your Lerna project.
-
-Change the `alias` to point to where those packages are actually installed. This depends on the directory structure of your Lerna project, so the actual path might be different from the diff below.
+由于使用`new Image()`的形式加载图片，对于同一张图片来讲，在组件 A 加载过的图片，组件 B 不用再走一遍`new Image()`的流程（在 `Chrome` 上表现为重复请求了图片，同时浏览器一般会缓存图片），直接返回上一次结果即可。
 
 ```diff
-   "alias": {
--    "react": "../node_modules/react",
--    "react-dom": "../node_modules/react-dom"
-+    "react": "../../../node_modules/react",
-+    "react-dom": "../../../node_modules/react-dom"
-   },
++ const cache: {
++  [key: string]: Promise<void>;
++ } = {};
+
+function useImage({
+  src,
+}: {
+  src: string;
+}): { src: string | undefined; isLoading: boolean; error: any } {
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState(null);
+  const [value, setValue] = React.useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
++   if (!cache[src]) {
++     cache[src] = imgPromise(src);
++   }
+
+-   imgPromise(src)
++   cache[src]
+      .then(() => {
+        setLoading(false);
+        setValue(src);
+      })
+      .catch(error => {
+        setLoading(false);
+        setError(error);
+      });
+  }, [src]);
+
+  return { isLoading: loading, src: value, error: error };
+}
 ```
 
-An alternative to fixing this problem would be to remove aliases altogether and define the dependencies referenced as aliases as dev dependencies instead. [However, that might cause other problems.](https://github.com/palmerhq/tsdx/issues/64)
+对比一下效果：
+
+![使用缓存后](https://tva1.sinaimg.cn/large/007S8ZIlgy1gfqgak4enug31qw0puam3.gif)
+
+#### 支持 srcList
+
+上文提到过一点：图片加载失败，加载备选图片或展示`error`占位符。
+
+展示`error`占位符我们可以通过`error`状态去控制，但是加载备选图片的功能还没有完成。
+
+主要思路如下：从第一张开始加载，如果加载失败就加在第二张，直到加载成功某一张或全部加载失败，流程结束。类似于 [tapable](https://github.com/webpack/tapable) 的`AsyncSeriesBailHook`。
